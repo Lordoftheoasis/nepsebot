@@ -15,9 +15,9 @@ check_ipo.py → MeroShare API
         │
         ├── No IPO open → does nothing
         │
-        └── IPO found → Discord message with [✅ Apply] [❌ Skip] buttons
+        └── IPO found → Discord message with [ Apply] [❌Skip] buttons
                               │
-                        You click ✅ Apply
+                        You click  Apply
                               │
                               ▼
                         bot.py (Railway) receives click
@@ -31,7 +31,7 @@ check_ipo.py → MeroShare API
                               │
                               ▼
                         Discord webhook notifications
-                        (per account ✅/❌ + final summary)
+                        (per account / + final summary)
 ```
 
 ---
@@ -111,7 +111,7 @@ Add these secrets:
 ### 4. GitHub Personal Access Token (for bot to trigger workflows)
 
 1. Go to https://github.com/settings/tokens → **Generate new token (classic)**
-2. Scopes: ✅ `repo`, ✅ `workflow`
+2. Scopes:  `repo`,  `workflow`
 3. Copy the token → save as `GITHUB_TOKEN`
 
 ---
@@ -142,7 +142,7 @@ Add these secrets:
   - If no IPO is open: silent, nothing happens.
   - If an IPO is open: you get a Discord message with **Apply** and **Skip** buttons.
 - **Manual check**: Go to GitHub → Actions → Check for Open IPOs → Run workflow
-- **Apply**: Click ✅ in Discord. Bot triggers GitHub Actions. You get notified per account.
+- **Apply**: Click  in Discord. Bot triggers GitHub Actions. You get notified per account.
 
 ---
 
