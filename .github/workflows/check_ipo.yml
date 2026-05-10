@@ -24,13 +24,13 @@ jobs:
       - name: Install dependencies
         run: pip install requests selenium gspread google-auth
 
-      - name: Install Chrome
-        run: |
-          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
+      - name: Install Chrome and ChromeDriver
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
 
-      - name: Install ChromeDriver
-        uses: nanasess/setup-chromedriver@v2
+      - name: Check Chrome version
+        run: google-chrome --version && chromedriver --version
 
       - name: Check for open IPOs
         env:
