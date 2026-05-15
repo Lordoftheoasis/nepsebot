@@ -185,29 +185,41 @@ def scrape_open_ipos(driver) -> list[dict]:
                 break
 
             # ── Parse list row for quick fallback data ────────────
-            # Row text example:
-            # "Sanima Equity Fund - II  -  For General Public (SANIMAEF2)\nIPO\nClose Ended Mutual Fund"
+            # MeroShare uses div-based rows, NOT table rows
             row_name  = f"IPO #{idx+1}"
             row_scrip = f"IPO{idx+1}"
             row_type  = "—"
             try:
-                row      = btns[idx].find_element(By.XPATH, "./ancestor::tr")
+                # Try common Angular list item containers
+                row = None
+                for ancestor in ["li", "div[contains(@class,'issue')]",
+                                  "div[contains(@class,'row')]",
+                                  "div[contains(@class,'list')]",
+                                  "div[contains(@class,'item')]"]:
+                    try:
+                        row = btns[idx].find_element(By.XPATH, f"./ancestor::{ancestor}")
+                        break
+                    except Exception:
+                        continue
+
+                if row is None:
+                    # Last resort — go up 3 parent levels
+                    row = btns[idx].find_element(By.XPATH, "./../../..")
+
                 row_text = row.text.strip()
                 print(f"[check_ipo] Row {idx+1}: {repr(row_text)}")
 
-                # Scrip is inside parentheses e.g. "(SANIMAEF2)"
                 scrip_match = re.search(r'\(([A-Z0-9]+)\)', row_text)
                 if scrip_match:
                     row_scrip = scrip_match.group(1)
 
-                # Company name is before the first " - "
-                if " - " in row_text.split("\n")[0]:
-                    row_name = row_text.split("\n")[0].split(" - ")[0].strip()
+                first_line = row_text.split("\n")[0].strip()
+                if " - " in first_line:
+                    row_name = first_line.split(" - ")[0].strip()
                 else:
-                    row_name = row_text.split("\n")[0].strip()
+                    row_name = first_line
 
-                # Share type is the last non-empty line
-                lines = [l.strip() for l in row_text.split("\n") if l.strip()]
+                lines    = [l.strip() for l in row_text.split("\n") if l.strip()]
                 row_type = lines[-1] if lines else "—"
 
             except Exception as e:
@@ -217,8 +229,12 @@ def scrape_open_ipos(driver) -> list[dict]:
             btns[idx].click()
             sleep(2)
 
-            # Dump full page text — MeroShare renders label on one line, value on next
+            # Dump full page text for debugging + extraction
             page_text = driver.find_element(By.TAG_NAME, "body").text
+
+            # Print first 60 lines of page text so we can see exact labels
+            lines_preview = page_text.split("\n")[:60]
+            print(f"[check_ipo] Detail page text (first 60 lines):\n" + "\n".join(lines_preview))
 
             company_name   = get_field(page_text, "Company Name",        row_name)
             scrip          = get_field(page_text, "Scrip",               row_scrip)
