@@ -130,32 +130,52 @@ def login(driver, dp_name: str, username: str, password: str):
 
 def scrape_open_ipos(driver) -> list[dict]:
     """
-    Navigate to the ASBA page, click into each IPO's detail page
-    to extract accurate name, scrip, type, open/close dates, and kitta limits.
-    Returns a list of dicts.
+    Navigate to ASBA, click into each IPO detail page and extract
+    fields using the exact label names from MeroShare's UI:
+
+    List row:   Company Name - Issue Description (Scrip)  [IPO]  Share Type  [Apply]
+    Detail page labels:
+        Company Name, Company Code, Issue Type,
+        Share Type, Issue Description, Scrip,
+        MaxUnit, MinUnit, Divisible By,
+        Share Value Per Unit, Share Value,
+        Issue Open Date, Issue Close Date
     """
+    import re
+
     driver.get("https://meroshare.cdsc.com.np/#/asba")
     sleep(3)
 
     wait = WebDriverWait(driver, 10)
 
-    # Wait for apply buttons to appear
     try:
         wait.until(EC.presence_of_element_located((By.CLASS_NAME, "btn-issue")))
     except Exception:
         print("[check_ipo] No open IPOs found on ASBA page.")
         return []
 
-    # Count how many IPOs are listed
-    buttons = driver.find_elements(By.CLASS_NAME, "btn-issue")
-    total   = len(buttons)
+    total = len(driver.find_elements(By.CLASS_NAME, "btn-issue"))
     print(f"[check_ipo] Found {total} apply button(s) on ASBA page")
 
     ipos = []
 
+    def get_field(page_text: str, label: str, fallback: str = "—") -> str:
+        """
+        Extract the value that appears on the line immediately after `label`
+        in the page's text dump. MeroShare renders label on one line,
+        value on the next.
+        """
+        lines = page_text.split("\n")
+        for i, line in enumerate(lines):
+            if line.strip() == label and i + 1 < len(lines):
+                val = lines[i + 1].strip()
+                if val:
+                    return val
+        return fallback
+
     for idx in range(total):
         try:
-            # Re-fetch buttons each iteration (DOM may refresh after navigating back)
+            # Re-navigate to ASBA each time — Angular re-renders after back navigation
             driver.get("https://meroshare.cdsc.com.np/#/asba")
             sleep(2)
             wait.until(EC.presence_of_element_located((By.CLASS_NAME, "btn-issue")))
@@ -164,90 +184,83 @@ def scrape_open_ipos(driver) -> list[dict]:
             if idx >= len(btns):
                 break
 
-            # Grab row text BEFORE clicking (for fallback)
-            row_text = ""
+            # ── Parse list row for quick fallback data ────────────
+            # Row text example:
+            # "Sanima Equity Fund - II  -  For General Public (SANIMAEF2)\nIPO\nClose Ended Mutual Fund"
+            row_name  = f"IPO #{idx+1}"
+            row_scrip = f"IPO{idx+1}"
+            row_type  = "—"
             try:
                 row      = btns[idx].find_element(By.XPATH, "./ancestor::tr")
                 row_text = row.text.strip()
-                print(f"[check_ipo] Row {idx+1} raw text: {repr(row_text)}")
-            except Exception:
-                pass
+                print(f"[check_ipo] Row {idx+1}: {repr(row_text)}")
 
-            # Click into the IPO detail page
+                # Scrip is inside parentheses e.g. "(SANIMAEF2)"
+                scrip_match = re.search(r'\(([A-Z0-9]+)\)', row_text)
+                if scrip_match:
+                    row_scrip = scrip_match.group(1)
+
+                # Company name is before the first " - "
+                if " - " in row_text.split("\n")[0]:
+                    row_name = row_text.split("\n")[0].split(" - ")[0].strip()
+                else:
+                    row_name = row_text.split("\n")[0].strip()
+
+                # Share type is the last non-empty line
+                lines = [l.strip() for l in row_text.split("\n") if l.strip()]
+                row_type = lines[-1] if lines else "—"
+
+            except Exception as e:
+                print(f"[check_ipo] Row parse error: {e}")
+
+            # ── Click into detail page ────────────────────────────
             btns[idx].click()
             sleep(2)
 
-            # ── Scrape detail page ────────────────────────────────
-            name       = "—"
-            scrip      = f"IPO{idx+1}"
-            share_type = "—"
-            open_date  = "—"
-            close_date = "—"
-            min_unit   = "—"
-            max_unit   = "—"
+            # Dump full page text — MeroShare renders label on one line, value on next
+            page_text = driver.find_element(By.TAG_NAME, "body").text
 
-            # MeroShare detail page uses labeled fields — grab all label/value pairs
-            try:
-                # Try to get all text content in the detail panel
-                page_text = driver.find_element(By.TAG_NAME, "body").text
+            company_name   = get_field(page_text, "Company Name",        row_name)
+            scrip          = get_field(page_text, "Scrip",               row_scrip)
+            issue_type     = get_field(page_text, "Issue Type",          "—")
+            share_type     = get_field(page_text, "Share Type",          row_type)
+            issue_desc     = get_field(page_text, "Issue Description",   "—")
+            min_unit       = get_field(page_text, "MinUnit",             "—")
+            max_unit       = get_field(page_text, "MaxUnit",             "—")
+            open_date      = get_field(page_text, "Issue Open Date",     "—")
+            close_date     = get_field(page_text, "Issue Close Date",    "—")
+            share_value    = get_field(page_text, "Share Value Per Unit","—")
 
-                # Helper: find value after a label in the page text
-                def extract_after(label, text, fallback="—"):
-                    if label in text:
-                        after = text.split(label)[-1].strip()
-                        value = after.split("\n")[0].strip()
-                        return value if value else fallback
-                    return fallback
-
-                name       = extract_after("Company Name",  page_text, name)
-                scrip      = extract_after("Scrip",         page_text, scrip)
-                share_type = extract_after("Share Type",    page_text, share_type)
-                open_date  = extract_after("Open Date",     page_text, open_date)
-                close_date = extract_after("Close Date",    page_text, close_date)
-                min_unit   = extract_after("Minimum Unit",  page_text, min_unit)
-                max_unit   = extract_after("Maximum Unit",  page_text, max_unit)
-
-                # Fallback: try alternate label names
-                if name == "—":
-                    name = extract_after("Issue Name", page_text, name)
-                if scrip == f"IPO{idx+1}":
-                    scrip = extract_after("Symbol", page_text, scrip)
-
-                print(f"[check_ipo] Scraped: {name} ({scrip}) | {share_type} | {open_date} → {close_date}")
-
-            except Exception as e:
-                print(f"[check_ipo] Detail scrape error for IPO {idx+1}: {e}")
-                # Fall back to row text parsing
-                if row_text:
-                    lines = [l.strip() for l in row_text.split("\n") if l.strip()]
-                    name  = lines[0] if lines else name
-
-            # Clean up scrip — remove any whitespace
             scrip = scrip.strip().upper()
-            # If scrip is still generic, derive from name
-            if not scrip or scrip == f"IPO{idx+1}":
-                scrip = name.split()[0].upper()[:8] if name != "—" else f"IPO{idx+1}"
+
+            print(f"[check_ipo] ✓ {company_name} ({scrip}) | {issue_type} | {share_type} | {open_date} → {close_date} | Min:{min_unit} Max:{max_unit}")
 
             ipos.append({
-                "name":       name,
-                "scrip":      scrip,
-                "share_type": share_type,
-                "open_date":  open_date,
-                "close_date": close_date,
-                "min_unit":   min_unit,
-                "max_unit":   max_unit,
+                "name":        company_name,
+                "scrip":       scrip,
+                "issue_type":  issue_type,
+                "share_type":  share_type,
+                "issue_desc":  issue_desc,
+                "min_unit":    min_unit,
+                "max_unit":    max_unit,
+                "open_date":   open_date,
+                "close_date":  close_date,
+                "share_value": share_value,
             })
 
         except Exception as e:
             print(f"[check_ipo] Error processing IPO {idx+1}: {e}")
             ipos.append({
-                "name":       f"IPO #{idx+1}",
-                "scrip":      f"IPO{idx+1}",
-                "share_type": "—",
-                "open_date":  "—",
-                "close_date": "—",
-                "min_unit":   "—",
-                "max_unit":   "—",
+                "name":        row_name,
+                "scrip":       row_scrip,
+                "issue_type":  "—",
+                "share_type":  row_type,
+                "issue_desc":  "—",
+                "min_unit":    "—",
+                "max_unit":    "—",
+                "open_date":   "—",
+                "close_date":  "—",
+                "share_value": "—",
             })
 
     return ipos
@@ -266,13 +279,16 @@ def logout(driver):
 
 def send_ipo_message(ipo: dict, index: int, total: int):
     """Send one Discord message per IPO with Apply / Skip buttons."""
-    name       = ipo["name"]
-    scrip      = ipo["scrip"].strip().upper()
-    share_type = ipo["share_type"]
-    open_date  = ipo.get("open_date", "—")
-    close_date = ipo["close_date"]
-    min_unit   = ipo.get("min_unit", "—")
-    max_unit   = ipo.get("max_unit", "—")
+    name        = ipo["name"]
+    scrip       = ipo["scrip"].strip().upper()
+    issue_type  = ipo.get("issue_type",  "—")
+    share_type  = ipo.get("share_type",  "—")
+    issue_desc  = ipo.get("issue_desc",  "—")
+    open_date   = ipo.get("open_date",   "—")
+    close_date  = ipo.get("close_date",  "—")
+    min_unit    = ipo.get("min_unit",    "—")
+    max_unit    = ipo.get("max_unit",    "—")
+    share_value = ipo.get("share_value", "—")
 
     apply_id = f"apply_ipo:{scrip}"
     skip_id  = f"skip_ipo:{scrip}"
@@ -280,22 +296,25 @@ def send_ipo_message(ipo: dict, index: int, total: int):
     payload = {
         "embeds": [
             {
-                "title": f"🔔 IPO Open: {name} ({scrip})",
+                "title": f"🔔 {issue_type}: {name} ({scrip})",
                 "description": (
-                    f"IPO **{index} of {total}** currently open on MeroShare."
+                    f"Issue **{index} of {total}** currently open on MeroShare."
                     if total > 1 else
-                    "An IPO is currently open on MeroShare."
+                    "An issue is currently open on MeroShare."
                 ),
                 "color": 0x3498DB,
                 "fields": [
-                    {"name": "📂 Type",      "value": share_type, "inline": True},
-                    {"name": "📅 Opens",     "value": open_date,  "inline": True},
-                    {"name": "📅 Closes",    "value": close_date, "inline": True},
-                    {"name": "📦 Min Kitta", "value": min_unit,   "inline": True},
-                    {"name": "📦 Max Kitta", "value": max_unit,   "inline": True},
-                    {"name": "🔖 Scrip",     "value": scrip,      "inline": True},
+                    {"name": "📂 Issue Type",      "value": issue_type,  "inline": True},
+                    {"name": "📋 Share Type",       "value": share_type,  "inline": True},
+                    {"name": "📝 For",              "value": issue_desc,  "inline": True},
+                    {"name": "📅 Opens",            "value": open_date,   "inline": True},
+                    {"name": "📅 Closes",           "value": close_date,  "inline": True},
+                    {"name": "💰 Price Per Unit",   "value": f"Rs. {share_value}", "inline": True},
+                    {"name": "📦 Min Kitta",        "value": min_unit,    "inline": True},
+                    {"name": "📦 Max Kitta",        "value": max_unit,    "inline": True},
+                    {"name": "🔖 Scrip",            "value": scrip,       "inline": True},
                 ],
-                "footer": {"text": "MeroShare IPO Bot • Scraped from ASBA page"},
+                "footer": {"text": "MeroShare IPO Bot"},
                 "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
             }
         ],
