@@ -78,6 +78,16 @@ def get_first_account() -> dict:
 
 def make_driver() -> webdriver.Chrome:
     """Create a headless Chrome driver for GitHub Actions environment."""
+    import subprocess
+    # Print Chrome and ChromeDriver versions for debugging
+    try:
+        chrome_ver = subprocess.check_output(["google-chrome", "--version"]).decode().strip()
+        driver_ver = subprocess.check_output(["chromedriver", "--version"]).decode().strip()
+        print(f"[check_ipo] {chrome_ver}")
+        print(f"[check_ipo] {driver_ver}")
+    except Exception as e:
+        print(f"[check_ipo] Could not get versions: {e}")
+
     opts = Options()
     opts.add_argument("--headless=new")
     opts.add_argument("--no-sandbox")
@@ -88,7 +98,14 @@ def make_driver() -> webdriver.Chrome:
     opts.add_argument("--remote-debugging-port=9222")
     opts.add_argument("--window-size=1920,1080")
     opts.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    return webdriver.Chrome(options=opts)
+
+    try:
+        driver = webdriver.Chrome(options=opts)
+        print("[check_ipo] Chrome launched successfully")
+        return driver
+    except Exception as e:
+        print(f"[check_ipo] Chrome failed to launch: {type(e).__name__}: {e}")
+        raise
 
 
 def login(driver, dp_name: str, username: str, password: str):
@@ -113,98 +130,125 @@ def login(driver, dp_name: str, username: str, password: str):
 
 def scrape_open_ipos(driver) -> list[dict]:
     """
-    Navigate to the ASBA page and scrape all open IPO entries.
-    Returns a list of dicts with: name, scrip, close_date, share_type
+    Navigate to the ASBA page, click into each IPO's detail page
+    to extract accurate name, scrip, type, open/close dates, and kitta limits.
+    Returns a list of dicts.
     """
     driver.get("https://meroshare.cdsc.com.np/#/asba")
     sleep(3)
 
-    ipos = []
+    wait = WebDriverWait(driver, 10)
 
+    # Wait for apply buttons to appear
     try:
-        # Wait for the issue buttons to appear
-        wait = WebDriverWait(driver, 10)
         wait.until(EC.presence_of_element_located((By.CLASS_NAME, "btn-issue")))
     except Exception:
-        # No IPOs found — page loaded but no buttons
         print("[check_ipo] No open IPOs found on ASBA page.")
         return []
 
-    # Each IPO is in a table row — scrape the rows
-    try:
-        rows = driver.find_elements(By.XPATH, "//table//tr[td]")
-        for row in rows:
+    # Count how many IPOs are listed
+    buttons = driver.find_elements(By.CLASS_NAME, "btn-issue")
+    total   = len(buttons)
+    print(f"[check_ipo] Found {total} apply button(s) on ASBA page")
+
+    ipos = []
+
+    for idx in range(total):
+        try:
+            # Re-fetch buttons each iteration (DOM may refresh after navigating back)
+            driver.get("https://meroshare.cdsc.com.np/#/asba")
+            sleep(2)
+            wait.until(EC.presence_of_element_located((By.CLASS_NAME, "btn-issue")))
+            btns = driver.find_elements(By.CLASS_NAME, "btn-issue")
+
+            if idx >= len(btns):
+                break
+
+            # Grab row text BEFORE clicking (for fallback)
+            row_text = ""
             try:
-                cells = row.find_elements(By.TAG_NAME, "td")
-                if len(cells) < 3:
-                    continue
+                row      = btns[idx].find_element(By.XPATH, "./ancestor::tr")
+                row_text = row.text.strip()
+                print(f"[check_ipo] Row {idx+1} raw text: {repr(row_text)}")
+            except Exception:
+                pass
 
-                # Extract text from cells — column order varies but name is usually first
-                # We grab all text and the apply button to confirm it's an active IPO
-                has_apply_btn = len(row.find_elements(By.CLASS_NAME, "btn-issue")) > 0
-                if not has_apply_btn:
-                    continue
+            # Click into the IPO detail page
+            btns[idx].click()
+            sleep(2)
 
-                # Pull cell text — typical columns: Company Name, Share Type, Close Date
-                texts = [c.text.strip() for c in cells]
+            # ── Scrape detail page ────────────────────────────────
+            name       = "—"
+            scrip      = f"IPO{idx+1}"
+            share_type = "—"
+            open_date  = "—"
+            close_date = "—"
+            min_unit   = "—"
+            max_unit   = "—"
 
-                # Company name is the first non-empty cell with substantial text
-                name = next((t for t in texts if len(t) > 3 and not t.startswith("Apply")), "Unknown")
+            # MeroShare detail page uses labeled fields — grab all label/value pairs
+            try:
+                # Try to get all text content in the detail panel
+                page_text = driver.find_element(By.TAG_NAME, "body").text
 
-                # Try to find close date (usually contains "/" or "-")
-                close_date = next(
-                    (t for t in texts if ("/" in t or "-" in t) and len(t) > 4 and t != name),
-                    "—"
-                )
+                # Helper: find value after a label in the page text
+                def extract_after(label, text, fallback="—"):
+                    if label in text:
+                        after = text.split(label)[-1].strip()
+                        value = after.split("\n")[0].strip()
+                        return value if value else fallback
+                    return fallback
 
-                # Share type — look for known keywords
-                share_type = next(
-                    (t for t in texts if any(k in t.upper() for k in ["IPO", "FPO", "RIGHT", "DEBENTURE", "MUTUAL"])),
-                    "—"
-                )
+                name       = extract_after("Company Name",  page_text, name)
+                scrip      = extract_after("Scrip",         page_text, scrip)
+                share_type = extract_after("Share Type",    page_text, share_type)
+                open_date  = extract_after("Open Date",     page_text, open_date)
+                close_date = extract_after("Close Date",    page_text, close_date)
+                min_unit   = extract_after("Minimum Unit",  page_text, min_unit)
+                max_unit   = extract_after("Maximum Unit",  page_text, max_unit)
 
-                # Scrip: try to get it from a dedicated column or derive from name
-                # Some MeroShare versions show scrip in a separate column
-                scrip = next(
-                    (t for t in texts if t.isupper() and 2 <= len(t) <= 10 and t not in ["IPO", "FPO"]),
-                    name.split()[0].upper()[:8]  # fallback: first word of name
-                )
+                # Fallback: try alternate label names
+                if name == "—":
+                    name = extract_after("Issue Name", page_text, name)
+                if scrip == f"IPO{idx+1}":
+                    scrip = extract_after("Symbol", page_text, scrip)
 
-                ipos.append({
-                    "name":       name,
-                    "scrip":      scrip,
-                    "close_date": close_date,
-                    "share_type": share_type,
-                })
+                print(f"[check_ipo] Scraped: {name} ({scrip}) | {share_type} | {open_date} → {close_date}")
 
             except Exception as e:
-                print(f"[check_ipo] Error parsing row: {e}")
-                continue
+                print(f"[check_ipo] Detail scrape error for IPO {idx+1}: {e}")
+                # Fall back to row text parsing
+                if row_text:
+                    lines = [l.strip() for l in row_text.split("\n") if l.strip()]
+                    name  = lines[0] if lines else name
 
-    except Exception as e:
-        print(f"[check_ipo] Error scraping ASBA table: {e}")
+            # Clean up scrip — remove any whitespace
+            scrip = scrip.strip().upper()
+            # If scrip is still generic, derive from name
+            if not scrip or scrip == f"IPO{idx+1}":
+                scrip = name.split()[0].upper()[:8] if name != "—" else f"IPO{idx+1}"
 
-    # If table scraping yielded nothing but buttons exist, fall back to button text
-    if not ipos:
-        buttons = driver.find_elements(By.CLASS_NAME, "btn-issue")
-        for i, btn in enumerate(buttons, 1):
-            try:
-                row  = btn.find_element(By.XPATH, "./ancestor::tr")
-                text = row.text.strip()
-                name = text.split("\n")[0].strip() or f"IPO #{i}"
-                ipos.append({
-                    "name":       name,
-                    "scrip":      name.split()[0].upper()[:8],
-                    "close_date": "—",
-                    "share_type": "—",
-                })
-            except Exception:
-                ipos.append({
-                    "name":       f"IPO #{i}",
-                    "scrip":      f"IPO{i}",
-                    "close_date": "—",
-                    "share_type": "—",
-                })
+            ipos.append({
+                "name":       name,
+                "scrip":      scrip,
+                "share_type": share_type,
+                "open_date":  open_date,
+                "close_date": close_date,
+                "min_unit":   min_unit,
+                "max_unit":   max_unit,
+            })
+
+        except Exception as e:
+            print(f"[check_ipo] Error processing IPO {idx+1}: {e}")
+            ipos.append({
+                "name":       f"IPO #{idx+1}",
+                "scrip":      f"IPO{idx+1}",
+                "share_type": "—",
+                "open_date":  "—",
+                "close_date": "—",
+                "min_unit":   "—",
+                "max_unit":   "—",
+            })
 
     return ipos
 
@@ -225,7 +269,10 @@ def send_ipo_message(ipo: dict, index: int, total: int):
     name       = ipo["name"]
     scrip      = ipo["scrip"].strip().upper()
     share_type = ipo["share_type"]
+    open_date  = ipo.get("open_date", "—")
     close_date = ipo["close_date"]
+    min_unit   = ipo.get("min_unit", "—")
+    max_unit   = ipo.get("max_unit", "—")
 
     apply_id = f"apply_ipo:{scrip}"
     skip_id  = f"skip_ipo:{scrip}"
@@ -241,9 +288,12 @@ def send_ipo_message(ipo: dict, index: int, total: int):
                 ),
                 "color": 0x3498DB,
                 "fields": [
-                    {"name": "📂 Type",   "value": share_type, "inline": True},
-                    {"name": "📅 Closes", "value": close_date, "inline": True},
-                    {"name": "🔖 Scrip",  "value": scrip,      "inline": True},
+                    {"name": "📂 Type",      "value": share_type, "inline": True},
+                    {"name": "📅 Opens",     "value": open_date,  "inline": True},
+                    {"name": "📅 Closes",    "value": close_date, "inline": True},
+                    {"name": "📦 Min Kitta", "value": min_unit,   "inline": True},
+                    {"name": "📦 Max Kitta", "value": max_unit,   "inline": True},
+                    {"name": "🔖 Scrip",     "value": scrip,      "inline": True},
                 ],
                 "footer": {"text": "MeroShare IPO Bot • Scraped from ASBA page"},
                 "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -304,7 +354,9 @@ def main():
         logout(driver)
 
     except Exception as e:
-        print(f"[check_ipo] Error during scrape: {e}")
+        import traceback
+        print(f"[check_ipo] Error during scrape: {type(e).__name__}: {e}")
+        print(traceback.format_exc())
         driver.quit()
         sys.exit(1)
     finally:
