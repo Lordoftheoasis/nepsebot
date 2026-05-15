@@ -184,43 +184,36 @@ def scrape_open_ipos(driver) -> list[dict]:
             if idx >= len(btns):
                 break
 
-            # ── Parse list row for quick fallback data ────────────
-            # MeroShare uses div-based rows, NOT table rows
+            # ── Parse list row for scrip fallback only ───────────
+            # The row text contains ALL IPOs (whole list is one container)
+            # So we extract per-IPO data from it by splitting on "Apply"
             row_name  = f"IPO #{idx+1}"
             row_scrip = f"IPO{idx+1}"
             row_type  = "—"
             try:
-                # Try common Angular list item containers
-                row = None
-                for ancestor in ["li", "div[contains(@class,'issue')]",
-                                  "div[contains(@class,'row')]",
-                                  "div[contains(@class,'list')]",
-                                  "div[contains(@class,'item')]"]:
-                    try:
-                        row = btns[idx].find_element(By.XPATH, f"./ancestor::{ancestor}")
-                        break
-                    except Exception:
-                        continue
+                row = btns[idx].find_element(By.XPATH, "./../../..")
+                full_list_text = row.text.strip()
 
-                if row is None:
-                    # Last resort — go up 3 parent levels
-                    row = btns[idx].find_element(By.XPATH, "./../../..")
+                # Split the list into individual IPO blocks by "Apply" keyword
+                # Each block looks like:
+                # "Company Name\n-\nFor General Public (SCRIP)\nIPO\nShare Type"
+                blocks = re.split(r'\nApply\n?', full_list_text)
+                if idx < len(blocks):
+                    block = blocks[idx].strip()
+                    lines = [l.strip() for l in block.split("\n") if l.strip()]
 
-                row_text = row.text.strip()
-                print(f"[check_ipo] Row {idx+1}: {repr(row_text)}")
+                    # Line 0: Company Name
+                    row_name = lines[0] if lines else row_name
 
-                scrip_match = re.search(r'\(([A-Z0-9]+)\)', row_text)
-                if scrip_match:
-                    row_scrip = scrip_match.group(1)
+                    # Find scrip in parentheses e.g. "(RSY2)"
+                    scrip_match = re.search(r'\(([A-Z0-9]+)\)', block)
+                    if scrip_match:
+                        row_scrip = scrip_match.group(1)
 
-                first_line = row_text.split("\n")[0].strip()
-                if " - " in first_line:
-                    row_name = first_line.split(" - ")[0].strip()
-                else:
-                    row_name = first_line
+                    # Share type is last line of the block
+                    row_type = lines[-1] if lines else "—"
 
-                lines    = [l.strip() for l in row_text.split("\n") if l.strip()]
-                row_type = lines[-1] if lines else "—"
+                    print(f"[check_ipo] Row {idx+1}: name={row_name} scrip={row_scrip} type={row_type}")
 
             except Exception as e:
                 print(f"[check_ipo] Row parse error: {e}")
@@ -229,23 +222,59 @@ def scrape_open_ipos(driver) -> list[dict]:
             btns[idx].click()
             sleep(2)
 
-            # Dump full page text for debugging + extraction
+            # Dump page text — structure from logs:
+            # "Apply for Company Share\n
+            #  Company Name\n-\nFor General Public (SCRIP)\nIPO\nShare Type\n
+            #  Issue Manager\nXXX\nIssue Open Date\n2026-...\nIssue Close Date\n2026-...
+            #  No. Of Share Issued\nXXX\nPrice per Share\nXXX\n
+            #  Minimum Quantity\nXXX\nMaximum Quantity\nXXX\nDivisible Quantity\nXXX"
             page_text = driver.find_element(By.TAG_NAME, "body").text
 
-            # Print first 60 lines of page text so we can see exact labels
-            lines_preview = page_text.split("\n")[:60]
-            print(f"[check_ipo] Detail page text (first 60 lines):\n" + "\n".join(lines_preview))
+            # ── Extract fields from detail page ───────────────────
+            # Actual page structure after "Apply for Company Share":
+            # [0] Company Name  e.g. "Reliable Samriddhi Yojana-2"
+            # [1] "-"
+            # [2] "For General Public (RSY2)"
+            # [3] "IPO"
+            # [4] "Close Ended Mutual Fund"
+            # [5] "Issue Manager"
+            # [6] Manager name
+            # [7] "Issue Open Date"
+            # [8] "2026-05-12 3:15 AM"
+            # [9] "Issue Close Date"
+            # [10] "2026-05-26 11:15 AM"
+            # ... "Minimum Quantity" / "Maximum Quantity" / "Price per Share"
 
-            company_name   = get_field(page_text, "Company Name",        row_name)
-            scrip          = get_field(page_text, "Scrip",               row_scrip)
-            issue_type     = get_field(page_text, "Issue Type",          "—")
-            share_type     = get_field(page_text, "Share Type",          row_type)
-            issue_desc     = get_field(page_text, "Issue Description",   "—")
-            min_unit       = get_field(page_text, "MinUnit",             "—")
-            max_unit       = get_field(page_text, "MaxUnit",             "—")
-            open_date      = get_field(page_text, "Issue Open Date",     "—")
-            close_date     = get_field(page_text, "Issue Close Date",    "—")
-            share_value    = get_field(page_text, "Share Value Per Unit","—")
+            company_name = row_name
+            scrip        = row_scrip
+            issue_type   = "IPO"
+            share_type   = row_type
+            issue_desc   = "—"
+
+            try:
+                marker       = "Apply for Company Share"
+                after        = page_text.split(marker)[-1].strip()
+                detail_lines = [l.strip() for l in after.split("\n") if l.strip()]
+
+                company_name = detail_lines[0] if len(detail_lines) > 0 else row_name
+                issue_type   = detail_lines[3] if len(detail_lines) > 3 else "IPO"
+                share_type   = detail_lines[4] if len(detail_lines) > 4 else row_type
+
+                # Scrip from parentheses in line 2 e.g. "For General Public (RSY2)"
+                if len(detail_lines) > 2:
+                    sm = re.search(r'\(([A-Z0-9]+)\)', detail_lines[2])
+                    scrip = sm.group(1) if sm else row_scrip
+                    issue_desc = detail_lines[2].split("(")[0].strip() if "(" in detail_lines[2] else detail_lines[2]
+
+            except Exception as e:
+                print(f"[check_ipo] Detail line parse error: {e}")
+
+            # These labels match the actual page text exactly
+            open_date   = get_field(page_text, "Issue Open Date",  "—")
+            close_date  = get_field(page_text, "Issue Close Date", "—")
+            min_unit    = get_field(page_text, "Minimum Quantity", "—")
+            max_unit    = get_field(page_text, "Maximum Quantity", "—")
+            share_value = get_field(page_text, "Price per Share",  "—")
 
             scrip = scrip.strip().upper()
 
