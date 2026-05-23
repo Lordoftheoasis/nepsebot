@@ -52,12 +52,12 @@ def notify_start(total_accounts: int, ipo_name: str = "Current IPO", kitta: int 
     }]})
 
 
-def notify_success(name: str, index: int, total: int, dp: str, kitta: int, crn: str):
+def notify_success(label: str, index: int, total: int, dp: str, kitta: int, crn: str):
     _send({"embeds": [{
         "title": "✅ Application Successful",
         "color": COLOR_SUCCESS,
         "fields": [
-            {"name": "👤 Name",         "value": name,              "inline": True},
+            {"name": "👤 Account",      "value": label,             "inline": True},
             {"name": "🏦 DP",           "value": dp,                "inline": True},
             {"name": "📦 Kitta",        "value": str(kitta),        "inline": True},
             {"name": "🔑 CRN",          "value": f"||{crn}||",      "inline": True},
@@ -68,13 +68,13 @@ def notify_success(name: str, index: int, total: int, dp: str, kitta: int, crn: 
     }]})
 
 
-def notify_failure(name: str, index: int, total: int, reason: str):
+def notify_failure(label: str, index: int, total: int, reason: str):
     short = (reason[:300] + "…") if len(reason) > 300 else reason
     _send({"embeds": [{
         "title": "❌ Application Failed",
         "color": COLOR_FAILURE,
         "fields": [
-            {"name": "👤 Name",     "value": name,                  "inline": True},
+            {"name": "👤 Account",  "value": label,                 "inline": True},
             {"name": "📊 Progress", "value": f"{index}/{total}",    "inline": True},
             {"name": "⚠️ Reason",  "value": f"```{short}```",       "inline": False},
         ],
@@ -87,7 +87,10 @@ def notify_summary(results: list[dict], kitta: int):
     total   = len(results)
     success = sum(1 for r in results if r["Status"] == "Success")
     failed  = total - success
-    lines   = [("✅" if r["Status"] == "Success" else "❌") + " " + r["Name"] for r in results]
+    lines   = [
+        ("✅" if r["Status"] == "Success" else "❌") + " " + r.get("label", r.get("Name", "?"))
+        for r in results
+    ]
 
     color = COLOR_SUCCESS if failed == 0 else (COLOR_FAILURE if success == 0 else COLOR_SUMMARY)
 
@@ -95,10 +98,10 @@ def notify_summary(results: list[dict], kitta: int):
         "title": "📊 IPO Batch — Final Summary",
         "color": color,
         "fields": [
-            {"name": "✅ Successful", "value": str(success),         "inline": True},
-            {"name": "❌ Failed",     "value": str(failed),          "inline": True},
-            {"name": "📦 Kitta",      "value": str(kitta),           "inline": True},
-            {"name": "📋 Results",    "value": "\n".join(lines),     "inline": False},
+            {"name": "✅ Successful", "value": str(success),     "inline": True},
+            {"name": "❌ Failed",     "value": str(failed),      "inline": True},
+            {"name": "📦 Kitta",      "value": str(kitta),       "inline": True},
+            {"name": "📋 Results",    "value": "\n".join(lines), "inline": False},
         ],
         "footer": {"text": "MeroShare IPO Bot • All done"},
         "timestamp": _ts(),
