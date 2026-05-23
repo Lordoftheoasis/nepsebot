@@ -65,12 +65,17 @@ class MeroShare:
         scrip: stock symbol e.g. "KAHL". If None, clicks the first IPO.
         """
         self.driver.get("https://meroshare.cdsc.com.np/#/asba")
-        sleep(2)
+
+        # Wait up to 15s for apply buttons to appear — Angular needs time to render
+        try:
+            self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "btn-issue")))
+        except Exception:
+            raise Exception(
+                "No open IPOs found on the ASBA page after waiting 15 seconds. "
+                "The IPO may have closed, or the page failed to load."
+            )
 
         buttons = self.driver.find_elements(By.CLASS_NAME, "btn-issue")
-
-        if not buttons:
-            raise Exception("No open IPOs found on the ASBA page.")
 
         if scrip is None:
             buttons[0].click()
