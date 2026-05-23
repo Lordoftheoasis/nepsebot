@@ -75,25 +75,38 @@ class MeroShare:
         scrip_upper = scrip.strip().upper()
         matched_idx = None
 
-        # Get full page text and log it for debugging
         try:
             page_text = self.driver.find_element(By.TAG_NAME, "body").text
-            # Log the ASBA section only — find lines around "Apply"
-            lines = page_text.split("\n")
-            asba_lines = [l for l in lines if l.strip() and any(
-                kw in l.upper() for kw in ["APPLY", "IPO", "FPO", scrip_upper]
-            )]
-            print(f"[find_ipo] Looking for scrip: '{scrip_upper}'")
-            print(f"[find_ipo] Relevant page lines: {asba_lines}")
 
+            # If scrip exists anywhere on the page at all
+            if f"({scrip_upper})" not in page_text.upper():
+                raise Exception(
+                    f"Could not find IPO with scrip '{scrip}'. "
+                    f"Found {len(buttons)} IPO(s) but none matched."
+                )
+
+            # Count which button index corresponds to this scrip.
+            # Split by "\nApply" to get chunks — but the sidebar splits off first,
+            # so we only count chunks that look like IPO entries (contain "IPO" or "FPO").
             chunks = page_text.split("\nApply")
-            print(f"[find_ipo] Found {len(chunks)} chunks, {len(buttons)} buttons")
-            for i, chunk in enumerate(chunks):
-                print(f"[find_ipo] Chunk {i}: {repr(chunk[-200:])}")  # last 200 chars
-                if f"({scrip_upper})" in chunk.upper():
-                    matched_idx = i
-                    break
+            ipo_chunk_idx = 0  # which IPO entry (0-based) contains our scrip
+            ipo_count = 0
+            for chunk in chunks:
+                is_ipo_chunk = any(
+                    kw in chunk.upper()
+                    for kw in ["\nIPO\n", "\nFPO\n", "\nRIGHT\n", "\nDEBENTURE\n", "\nMUTUAL\n", "ORDINARY SHARES", "MUTUAL FUND"]
+                )
+                if is_ipo_chunk:
+                    if f"({scrip_upper})" in chunk.upper():
+                        matched_idx = ipo_count
+                        break
+                    ipo_count += 1
+
+            print(f"[find_ipo] Scrip '{scrip_upper}' found at button index: {matched_idx}")
+
         except Exception as e:
+            if "Could not find" in str(e):
+                raise
             print(f"[find_ipo] Page text error: {e}")
 
         if matched_idx is not None and matched_idx < len(buttons):
