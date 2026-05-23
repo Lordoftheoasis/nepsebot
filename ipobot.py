@@ -73,18 +73,28 @@ class MeroShare:
             return
 
         scrip_upper = scrip.strip().upper()
-
-        # Split page text by "Apply" to get per-IPO chunks matching button order
         matched_idx = None
+
+        # Get full page text and log it for debugging
         try:
             page_text = self.driver.find_element(By.TAG_NAME, "body").text
+            # Log the ASBA section only — find lines around "Apply"
+            lines = page_text.split("\n")
+            asba_lines = [l for l in lines if l.strip() and any(
+                kw in l.upper() for kw in ["APPLY", "IPO", "FPO", scrip_upper]
+            )]
+            print(f"[find_ipo] Looking for scrip: '{scrip_upper}'")
+            print(f"[find_ipo] Relevant page lines: {asba_lines}")
+
             chunks = page_text.split("\nApply")
+            print(f"[find_ipo] Found {len(chunks)} chunks, {len(buttons)} buttons")
             for i, chunk in enumerate(chunks):
+                print(f"[find_ipo] Chunk {i}: {repr(chunk[-200:])}")  # last 200 chars
                 if f"({scrip_upper})" in chunk.upper():
                     matched_idx = i
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[find_ipo] Page text error: {e}")
 
         if matched_idx is not None and matched_idx < len(buttons):
             buttons[matched_idx].click()
