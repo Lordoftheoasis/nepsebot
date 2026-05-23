@@ -82,6 +82,8 @@ def load_accounts_from_sheets() -> list[dict]:
         if not account["Username"] or not account["Password"]:
             continue
 
+        # Use Name for display if available, fall back to Username
+        account["label"] = account.get("Name") or account["Username"]
         accounts.append(account)
 
     return accounts
@@ -94,7 +96,7 @@ def load_accounts_from_excel(filepath: str = "accounts.xlsx") -> list[dict]:
     df = pd.read_excel(filepath)
     df.columns = [c.strip() for c in df.columns]
 
-    required = ["Name", "DP", "Username", "Password", "CRN", "PIN"]
+    required = ["DP", "Username", "Password", "CRN", "PIN"]
     col_map  = {}
     for req in required:
         match = next((c for c in df.columns if c.lower() == req.lower()), None)
@@ -106,7 +108,10 @@ def load_accounts_from_excel(filepath: str = "accounts.xlsx") -> list[dict]:
     df = df.dropna(subset=["Username", "Password", "CRN", "PIN"], how="all")
     df["PIN"] = df["PIN"].astype(str).str.strip().str.split(".").str[0]
     df["CRN"] = df["CRN"].astype(str).str.strip().str.split(".").str[0]
-    return df.to_dict(orient="records")
+    records = df.to_dict(orient="records")
+    for r in records:
+        r["label"] = r["Username"]
+    return records
 
 
 def main():
@@ -133,29 +138,28 @@ def main():
     results = []
 
     for i, user in enumerate(accounts, start=1):
-        name = user.get("Name", f"Account {i}")
-        print(f"[{i}/{total}] Processing: {name}")
+        label = user["label"]
+        print(f"[{i}/{total}] Processing: {label}")
 
         try:
             bot.login(user["DP"], user["Username"], user["Password"])
-            # Pass the scrip so ipobot clicks the right IPO
             bot.find_ipo(scrip=IPO_SCRIP)
             bot.apply_ipo(APPLIED_KITTA, user["CRN"])
             bot.enter_pin(user["PIN"])
             bot.logout()
 
-            print(f"  ✓ Applied successfully: {name}")
-            results.append({"Name": name, "Status": "Success"})
+            print(f"  ✓ Applied successfully: {label}")
+            results.append({"label": label, "Status": "Success"})
             notify_success(
-                name=name, index=i, total=total,
+                label=label, index=i, total=total,
                 dp=user["DP"], kitta=APPLIED_KITTA, crn=user["CRN"],
             )
 
         except Exception as e:
             error_msg = str(e)
-            print(f"  ✗ Failed: {name} — {error_msg}")
-            results.append({"Name": name, "Status": f"Failed: {error_msg}"})
-            notify_failure(name=name, index=i, total=total, reason=error_msg)
+            print(f"  ✗ Failed: {label} — {error_msg}")
+            results.append({"label": label, "Status": f"Failed: {error_msg}"})
+            notify_failure(label=label, index=i, total=total, reason=error_msg)
 
             try:
                 bot.driver.get("https://meroshare.cdsc.com.np/#/login")
@@ -164,12 +168,11 @@ def main():
 
     bot.quit()
 
-    # Print summary
     print("\n" + "=" * 40)
     success = sum(1 for r in results if r["Status"] == "Success")
     for r in results:
         icon = "✓" if r["Status"] == "Success" else "✗"
-        print(f"  {icon} {r['Name']}: {r['Status']}")
+        print(f"  {icon} {r['label']}: {r['Status']}")
     print(f"\nCompleted: {success}/{total} successful")
 
     notify_summary(results=results, kitta=APPLIED_KITTA)
