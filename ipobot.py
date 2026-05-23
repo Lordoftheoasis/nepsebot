@@ -19,7 +19,6 @@ class MeroShare:
             self.driver = webdriver.Chrome(service=s)
         else:
             opts = Options()
-            # Headless args for GitHub Actions / any headless environment
             opts.add_argument("--headless=new")
             opts.add_argument("--no-sandbox")
             opts.add_argument("--disable-dev-shm-usage")
@@ -31,11 +30,10 @@ class MeroShare:
             opts.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
             self.driver = webdriver.Chrome(options=opts)
 
-        self.driver.maximize_window()
-        self.wait = WebDriverWait(self.driver, 10)
+        self.wait = WebDriverWait(self.driver, 15)
 
     def login(self, dp_name, username, password):
-        """Log in to MeroShare."""
+        """Log in to MeroShare. Raises clearly if login fails."""
         self.driver.get("https://meroshare.cdsc.com.np/#/login")
         sleep(2)
 
@@ -47,21 +45,24 @@ class MeroShare:
         dp_input.send_keys(dp_name, Keys.ENTER)
         sleep(1)
 
-        # Username
+        # Username and password
         self.driver.find_element(By.ID, "username").send_keys(username)
-
-        # Password
         self.driver.find_element(By.ID, "password").send_keys(password, Keys.ENTER)
         sleep(2)
+
+        # Verify login succeeded — wait for dashboard URL
+        try:
+            self.wait.until(EC.url_contains("dashboard"))
+        except Exception:
+            raise Exception(
+                f"Login failed for '{username}'. "
+                "Check credentials, DP name, or if MeroShare is slow/down."
+            )
 
     def find_ipo(self, scrip: str = None):
         """
         Navigate to ASBA and click the correct IPO.
-
-        scrip: the stock symbol/scrip e.g. "KAHL", "SNOW"
-               Matches against the full page text which contains
-               scrips in parentheses e.g. "(KAHL)"
-               If None, clicks the first IPO.
+        scrip: stock symbol e.g. "KAHL". If None, clicks the first IPO.
         """
         self.driver.get("https://meroshare.cdsc.com.np/#/asba")
         sleep(2)
@@ -78,13 +79,11 @@ class MeroShare:
 
         scrip_upper = scrip.strip().upper()
 
-        # MeroShare uses divs not table rows — we can't walk up to a row cleanly.
-        # Instead: get the full page text, split by IPO chunks, find which index
-        # matches our scrip, then click that button by index.
+        # Get full page text, split into per-IPO chunks by "Apply" keyword
+        # Each chunk corresponds to one button at the same index
         matched_idx = None
         try:
             page_text = self.driver.find_element(By.TAG_NAME, "body").text
-            # Each IPO entry ends with "\nApply" — split on that
             chunks = page_text.split("\nApply")
             for i, chunk in enumerate(chunks):
                 if f"({scrip_upper})" in chunk.upper():
@@ -98,10 +97,9 @@ class MeroShare:
             sleep(1)
             return
 
-        # Fallback: check button index by scrip in surrounding text directly
+        # Fallback: walk up two parent levels from each button
         for i, btn in enumerate(buttons):
             try:
-                # Go up several parent levels to get enclosing container text
                 parent = btn.find_element(By.XPATH, "./../..")
                 if f"({scrip_upper})" in parent.text.upper():
                     btn.click()
@@ -112,20 +110,21 @@ class MeroShare:
 
         raise Exception(
             f"Could not find IPO with scrip '{scrip}' on the ASBA page. "
-            f"Found {len(buttons)} IPO(s) but none matched. "
-            f"Available scrips can be seen in the GitHub Actions logs from check_ipo.py."
+            f"Found {len(buttons)} IPO(s) but none matched."
         )
 
     def apply_ipo(self, applied_unit, crn):
         """Fill out and submit the IPO application form."""
         sleep(1)
 
-        # Select Bank (selects the first bank in the list)
+        # Select Bank — one ARROW_DOWN skips the placeholder "Please choose one"
+        # and lands on the user's first (and usually only) registered bank
         bank = self.driver.find_element(By.ID, "selectBank")
         bank.click()
-        bank.send_keys(Keys.ARROW_DOWN)
+        sleep(0.5)
         bank.send_keys(Keys.ARROW_DOWN)
         bank.send_keys(Keys.ENTER)
+        sleep(0.5)
 
         # Applied Kitta
         applied_kitta = self.driver.find_element(By.ID, "appliedKitta")
@@ -160,11 +159,15 @@ class MeroShare:
     def logout(self):
         """Log out of MeroShare."""
         sleep(2)
-        self.driver.find_element(
-            By.XPATH,
-            "/html/body/app-dashboard/header/div[2]/div/div/div/ul/li[1]/a/i",
-        ).click()
-        sleep(1)
+        try:
+            self.driver.find_element(
+                By.XPATH,
+                "/html/body/app-dashboard/header/div[2]/div/div/div/ul/li[1]/a/i",
+            ).click()
+            sleep(1)
+        except Exception:
+            # If logout fails just navigate away — next login will still work
+            self.driver.get("https://meroshare.cdsc.com.np/#/login")
 
     def quit(self):
         """Close the browser."""
