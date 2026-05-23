@@ -58,9 +58,10 @@ class MeroShare:
         """
         Navigate to ASBA and click the correct IPO.
 
-        scrip: the stock symbol/scrip of the IPO to apply for
-               e.g. "NABIL", "UPPER"
-               If None or not found, falls back to clicking the first IPO.
+        scrip: the stock symbol/scrip e.g. "KAHL", "SNOW"
+               Matches against the full page text which contains
+               scrips in parentheses e.g. "(KAHL)"
+               If None, clicks the first IPO.
         """
         self.driver.get("https://meroshare.cdsc.com.np/#/asba")
         sleep(2)
@@ -71,35 +72,49 @@ class MeroShare:
             raise Exception("No open IPOs found on the ASBA page.")
 
         if scrip is None:
-            # No scrip specified — click the first one (original behaviour)
             buttons[0].click()
             sleep(1)
             return
 
-        # Try to find the button whose parent row contains the scrip text
         scrip_upper = scrip.strip().upper()
-        matched = None
 
-        for btn in buttons:
-            try:
-                # Walk up to the row container and check its text
-                row = btn.find_element(By.XPATH, "./ancestor::tr")
-                if scrip_upper in row.text.upper():
-                    matched = btn
+        # MeroShare uses divs not table rows — we can't walk up to a row cleanly.
+        # Instead: get the full page text, split by IPO chunks, find which index
+        # matches our scrip, then click that button by index.
+        matched_idx = None
+        try:
+            page_text = self.driver.find_element(By.TAG_NAME, "body").text
+            # Each IPO entry ends with "\nApply" — split on that
+            chunks = page_text.split("\nApply")
+            for i, chunk in enumerate(chunks):
+                if f"({scrip_upper})" in chunk.upper():
+                    matched_idx = i
                     break
+        except Exception:
+            pass
+
+        if matched_idx is not None and matched_idx < len(buttons):
+            buttons[matched_idx].click()
+            sleep(1)
+            return
+
+        # Fallback: check button index by scrip in surrounding text directly
+        for i, btn in enumerate(buttons):
+            try:
+                # Go up several parent levels to get enclosing container text
+                parent = btn.find_element(By.XPATH, "./../..")
+                if f"({scrip_upper})" in parent.text.upper():
+                    btn.click()
+                    sleep(1)
+                    return
             except Exception:
-                pass
+                continue
 
-        if matched:
-            matched.click()
-        else:
-            # Scrip not found in any row — raise clearly so the caller knows
-            raise Exception(
-                f"Could not find IPO with scrip '{scrip}' on the ASBA page. "
-                f"Found {len(buttons)} IPO(s) but none matched."
-            )
-
-        sleep(1)
+        raise Exception(
+            f"Could not find IPO with scrip '{scrip}' on the ASBA page. "
+            f"Found {len(buttons)} IPO(s) but none matched. "
+            f"Available scrips can be seen in the GitHub Actions logs from check_ipo.py."
+        )
 
     def apply_ipo(self, applied_unit, crn):
         """Fill out and submit the IPO application form."""
