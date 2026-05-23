@@ -10,10 +10,6 @@ from time import sleep
 
 class MeroShare:
     def __init__(self, driver_path=None):
-        """
-        Initialize MeroShare bot.
-        driver_path: path to your chromedriver. If None, assumes chromedriver is in PATH.
-        """
         if driver_path:
             s = Service(driver_path)
             self.driver = webdriver.Chrome(service=s)
@@ -37,20 +33,16 @@ class MeroShare:
         self.driver.get("https://meroshare.cdsc.com.np/#/login")
         sleep(2)
 
-        # Click the DP dropdown placeholder
         self.driver.find_element(By.CLASS_NAME, "select2-selection__placeholder").click()
-
-        # Type and select the DP
         dp_input = self.driver.find_element(By.XPATH, "/html/body/span/span/span[1]/input")
         dp_input.send_keys(dp_name, Keys.ENTER)
         sleep(1)
 
-        # Username and password
         self.driver.find_element(By.ID, "username").send_keys(username)
         self.driver.find_element(By.ID, "password").send_keys(password, Keys.ENTER)
         sleep(2)
 
-        # Verify login succeeded — wait for dashboard URL
+        # Verify login succeeded
         try:
             self.wait.until(EC.url_contains("dashboard"))
         except Exception:
@@ -61,31 +53,28 @@ class MeroShare:
 
     def find_ipo(self, scrip: str = None):
         """
-        Navigate to ASBA and click the correct IPO.
-        scrip: stock symbol e.g. "KAHL". If None, clicks the first IPO.
+        Navigate to ASBA and click the Apply button for the correct IPO.
+        scrip: stock symbol e.g. "NRML". If None, clicks the first IPO.
         """
         self.driver.get("https://meroshare.cdsc.com.np/#/asba")
 
-        # Wait up to 15s for apply buttons to appear — Angular needs time to render
-        try:
-            self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "btn-issue")))
-        except Exception:
-            raise Exception(
-                "No open IPOs found on the ASBA page after waiting 15 seconds. "
-                "The IPO may have closed, or the page failed to load."
-            )
+        # Wait for apply buttons to render
+        self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "btn-issue")))
+        sleep(1)
 
         buttons = self.driver.find_elements(By.CLASS_NAME, "btn-issue")
 
+        if not buttons:
+            raise Exception("No open IPOs found on the ASBA page.")
+
         if scrip is None:
             buttons[0].click()
-            sleep(1)
+            sleep(2)
             return
 
         scrip_upper = scrip.strip().upper()
 
-        # Get full page text, split into per-IPO chunks by "Apply" keyword
-        # Each chunk corresponds to one button at the same index
+        # Split page text by "Apply" to get per-IPO chunks matching button order
         matched_idx = None
         try:
             page_text = self.driver.find_element(By.TAG_NAME, "body").text
@@ -99,71 +88,123 @@ class MeroShare:
 
         if matched_idx is not None and matched_idx < len(buttons):
             buttons[matched_idx].click()
-            sleep(1)
+            sleep(2)
             return
 
-        # Fallback: walk up two parent levels from each button
-        for i, btn in enumerate(buttons):
+        # Fallback: walk up parent elements
+        for btn in buttons:
             try:
                 parent = btn.find_element(By.XPATH, "./../..")
                 if f"({scrip_upper})" in parent.text.upper():
                     btn.click()
-                    sleep(1)
+                    sleep(2)
                     return
             except Exception:
                 continue
 
         raise Exception(
-            f"Could not find IPO with scrip '{scrip}' on the ASBA page. "
+            f"Could not find IPO with scrip '{scrip}'. "
             f"Found {len(buttons)} IPO(s) but none matched."
         )
 
     def apply_ipo(self, applied_unit, crn):
-        """Fill out and submit the IPO application form."""
+        """
+        Fill the application form based on actual UI:
+        1. Wait for form to load
+        2. Select bank (pre-registered bank, pick first option)
+        3. Branch and Account Number auto-fill after bank selection
+        4. Applied Kitta is pre-filled with 10 — only change if different
+        5. Check disclaimer checkbox FIRST
+        6. Enter CRN
+        7. Click Proceed
+        """
+        # Wait for bank dropdown to confirm form is loaded
+        self.wait.until(EC.presence_of_element_located((By.ID, "selectBank")))
         sleep(1)
 
-        # Select Bank — one ARROW_DOWN skips the placeholder "Please choose one"
-        # and lands on the user's first (and usually only) registered bank
+        # Select bank — one ARROW_DOWN from placeholder lands on first registered bank
         bank = self.driver.find_element(By.ID, "selectBank")
         bank.click()
         sleep(0.5)
         bank.send_keys(Keys.ARROW_DOWN)
         bank.send_keys(Keys.ENTER)
+        sleep(1)  # Wait for Branch and Account Number to auto-fill
+
+        # Applied Kitta — always clear and fill from secrets value
+        kitta_field = self.driver.find_element(By.ID, "appliedKitta")
+        kitta_field.click()
+        kitta_field.send_keys(Keys.CONTROL + "a")
+        kitta_field.send_keys(str(applied_unit))
         sleep(0.5)
 
-        # Applied Kitta
-        applied_kitta = self.driver.find_element(By.ID, "appliedKitta")
-        applied_kitta.clear()
-        applied_kitta.send_keys(str(applied_unit))
-
-        # CRN Number
-        self.driver.find_element(By.ID, "crnNumber").send_keys(str(crn))
-
-        # Disclaimer checkbox
+        # Disclaimer checkbox FIRST (before CRN entry)
         self.driver.find_element(By.ID, "disclaimer").click()
+        sleep(0.5)
 
+        # CRN — enter after checkbox
+        crn_field = self.driver.find_element(By.ID, "crnNumber")
+        crn_field.clear()
+        crn_field.send_keys(str(crn))
+        sleep(0.5)
+
+        # Proceed button — find by text, fall back to XPath
+        try:
+            proceed = self.driver.find_element(
+                By.XPATH, "//button[normalize-space(text())='Proceed']"
+            )
+        except Exception:
+            proceed = self.driver.find_element(
+                By.XPATH,
+                '//*[@id="main"]/div/app-edit/div/div/wizard/div/wizard-step[1]/form/div[2]/div/div[4]/div[2]/div/button[1]'
+            )
+        proceed.click()
         sleep(2)
-
-        # Click Proceed
-        self.driver.find_element(
-            By.XPATH,
-            '//*[@id="main"]/div/app-edit/div/div/wizard/div/wizard-step[1]/form/div[2]/div/div[4]/div[2]/div/button[1]',
-        ).click()
 
     def enter_pin(self, transaction_pin):
-        """Enter the transaction PIN to confirm the application."""
+        """
+        Enter PIN on the confirmation page.
+
+        From the UI screenshot:
+        - Simple text input (no ID shown, but visible)
+        - Button says "Apply" (not Confirm/Submit)
+        - URL is still #/asba/apply/{id}
+        """
+        # Wait for PIN input to appear
+        self.wait.until(EC.presence_of_element_located((By.ID, "transactionPIN")))
         sleep(1)
+
         self.driver.find_element(By.ID, "transactionPIN").send_keys(str(transaction_pin))
         sleep(1)
-        self.driver.find_element(
-            By.XPATH,
-            '//*[@id="main"]/div/app-issue/div/wizard/div/wizard-step[2]/div[2]/div/form/div[2]/div/div/div/button[1]/span',
-        ).click()
-        sleep(2)
+
+        # Apply button — find by text first, fall back to XPath
+        try:
+            apply_btn = self.driver.find_element(
+                By.XPATH, "//button[normalize-space(text())='Apply']"
+            )
+        except Exception:
+            apply_btn = self.driver.find_element(
+                By.XPATH,
+                '//*[@id="main"]/div/app-issue/div/wizard/div/wizard-step[2]/div[2]/div/form/div[2]/div/div/div/button[1]/span'
+            )
+        apply_btn.click()
+        sleep(3)
+
+        # Confirm success — look for any success indicator on the page
+        try:
+            page_text = self.driver.find_element(By.TAG_NAME, "body").text
+            if any(word in page_text.lower() for word in ["success", "successful", "applied"]):
+                return  # Application confirmed
+            # If we're still on the PIN page, something went wrong
+            if "transaction pin" in page_text.lower():
+                raise Exception("PIN was rejected or application failed. Check PIN and CRN.")
+        except Exception as e:
+            if "PIN was rejected" in str(e):
+                raise
+            pass  # Page text check failed — proceed anyway
 
     def logout(self):
         """Log out of MeroShare."""
-        sleep(2)
+        sleep(1)
         try:
             self.driver.find_element(
                 By.XPATH,
@@ -171,7 +212,6 @@ class MeroShare:
             ).click()
             sleep(1)
         except Exception:
-            # If logout fails just navigate away — next login will still work
             self.driver.get("https://meroshare.cdsc.com.np/#/login")
 
     def quit(self):
