@@ -1,8 +1,6 @@
 name: Apply IPO
 
 on:
-  # Triggered by the Discord bot when you click "Apply"
-  # Receives scrip and ipo_name from the button interaction
   workflow_dispatch:
     inputs:
       scrip:
@@ -16,6 +14,7 @@ on:
 jobs:
   apply:
     runs-on: ubuntu-latest
+    timeout-minutes: 30    # Prevent hanging forever if Chrome stalls
 
     steps:
       - name: Checkout code
