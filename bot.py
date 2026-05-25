@@ -107,9 +107,11 @@ async def on_interaction(interaction: discord.Interaction):
     try:
         if interaction.message.embeds:
             title = interaction.message.embeds[0].title or ""
-            # Title: "🔔 IPO Open: Company Name (SCRIP)"
-            if "IPO Open:" in title:
-                ipo_name = title.split("IPO Open:")[-1].strip()
+            # Title format: "🔔 IPO: Company Name (SCRIP)" or "🔔 IPO Open: ..."
+            for marker in ["IPO Open:", "IPO:", "FPO:", "RIGHT:"]:
+                if marker in title:
+                    ipo_name = title.split(marker)[-1].strip()
+                    break
     except Exception:
         pass
 
@@ -129,17 +131,20 @@ async def on_interaction(interaction: discord.Interaction):
         success = trigger_github_workflow(scrip=scrip, ipo_name=ipo_name)
 
         if success:
-            # Disable the buttons on the original message
+            # Remove buttons from original message — use view=None not components=[]
             try:
                 await interaction.message.edit(
                     content=(
                         f"✅ **{ipo_name}** — application triggered by "
                         f"{interaction.user.mention}. Live updates below."
                     ),
-                    components=[],
+                    view=None,
                 )
             except Exception:
                 pass
+
+            # Clear from running set so it can be triggered again if needed
+            _running_scrips.discard(scrip)
 
             await interaction.followup.send(
                 embed=discord.Embed(
@@ -173,7 +178,7 @@ async def on_interaction(interaction: discord.Interaction):
         try:
             await interaction.message.edit(
                 content=f"⏭️ **{ipo_name}** skipped by {interaction.user.mention}.",
-                components=[],
+                view=None,
             )
         except Exception:
             pass
