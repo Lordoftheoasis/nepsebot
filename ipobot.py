@@ -130,31 +130,43 @@ class MeroShare:
         Follows original source exactly — only the Proceed button
         selector is updated since the wizard XPath no longer exists.
         """
-        # Wait for form to load rather than blind sleep
+        # Wait for form to load
         self.wait.until(EC.presence_of_element_located((By.ID, "selectBank")))
         sleep(1)
 
+        # Helper — scroll into view then JS click (avoids element not interactable)
+        def js_click(el):
+            self.driver.execute_script("arguments[0].scrollIntoView(true);", el)
+            sleep(0.3)
+            self.driver.execute_script("arguments[0].click();", el)
+
         # Select bank — original source uses 2x ARROW_DOWN
         bank = self.driver.find_element(By.ID, "selectBank")
-        bank.click()
+        js_click(bank)
+        sleep(0.5)
         bank.send_keys(Keys.ARROW_DOWN)
         bank.send_keys(Keys.ARROW_DOWN)
         bank.send_keys(Keys.ENTER)
+        sleep(1)
 
-        # Applied Kitta — original source clears then sends
+        # Applied Kitta
         applied_kitta = self.driver.find_element(By.ID, "appliedKitta")
+        self.driver.execute_script("arguments[0].scrollIntoView(true);", applied_kitta)
         applied_kitta.clear()
         applied_kitta.send_keys(applied_unit)
 
         # CRN
-        self.driver.find_element(By.ID, "crnNumber").send_keys(crn)
+        crn_field = self.driver.find_element(By.ID, "crnNumber")
+        self.driver.execute_script("arguments[0].scrollIntoView(true);", crn_field)
+        crn_field.send_keys(crn)
 
-        # Disclaimer
-        self.driver.find_element(By.ID, "disclaimer").click()
+        # Disclaimer — JS click since it can be off-screen
+        disclaimer = self.driver.find_element(By.ID, "disclaimer")
+        js_click(disclaimer)
 
         sleep(2)
 
-        # Proceed button — wizard XPath removed, try text-based selectors
+        # Proceed button
         proceed = None
         for selector in [
             (By.XPATH, "//button[contains(text(),'Proceed')]"),
@@ -173,21 +185,20 @@ class MeroShare:
             print(f"[apply_ipo] Buttons on page: {[b.text.strip() for b in all_buttons]}")
             raise Exception("Could not find Proceed button.")
 
-        proceed.click()
+        js_click(proceed)
 
     def enter_pin(self, transaction_pin):
-        """
-        Enter transaction PIN.
-        Follows original source exactly — only the confirm button
-        selector is updated since the wizard XPath no longer exists.
-        """
+        """Enter transaction PIN."""
         sleep(1)
-
         self.wait.until(EC.presence_of_element_located((By.ID, "transactionPIN")))
-        self.driver.find_element(By.ID, "transactionPIN").send_keys(str(transaction_pin))
+
+        pin_field = self.driver.find_element(By.ID, "transactionPIN")
+        self.driver.execute_script("arguments[0].scrollIntoView(true);", pin_field)
+        sleep(0.3)
+        pin_field.send_keys(str(transaction_pin))
         sleep(1)
 
-        # Confirm button
+        # Apply button
         apply_btn = None
         for selector in [
             (By.XPATH, "//button[contains(text(),'Apply')]"),
@@ -206,7 +217,9 @@ class MeroShare:
             print(f"[enter_pin] Buttons on page: {[b.text.strip() for b in all_buttons]}")
             raise Exception("Could not find Apply button on PIN page.")
 
-        apply_btn.click()
+        self.driver.execute_script("arguments[0].scrollIntoView(true);", apply_btn)
+        sleep(0.3)
+        self.driver.execute_script("arguments[0].click();", apply_btn)
         sleep(2)
 
     def logout(self):
