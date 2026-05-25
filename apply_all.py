@@ -82,6 +82,10 @@ def load_accounts_from_sheets() -> list[dict]:
         if not account["Username"] or not account["Password"]:
             continue
 
+        # Strip float-style formatting from PIN and CRN just in case
+        account["PIN"] = account["PIN"].split(".")[0]
+        account["CRN"] = account["CRN"].split(".")[0]
+
         # Use Name for display if available, fall back to Username
         account["label"] = account.get("Name") or account["Username"]
         accounts.append(account)
@@ -96,21 +100,24 @@ def load_accounts_from_excel(filepath: str = "accounts.xlsx") -> list[dict]:
     df = pd.read_excel(filepath)
     df.columns = [c.strip() for c in df.columns]
 
-    required = ["DP", "Username", "Password", "CRN", "PIN"]
+    required = ["Name", "DP", "Username", "Password", "CRN", "PIN"]
     col_map  = {}
     for req in required:
         match = next((c for c in df.columns if c.lower() == req.lower()), None)
-        if match is None:
+        if match is None and req != "Name":  # Name is optional
             raise ValueError(f"Missing column: '{req}'")
-        col_map[req] = match
+        if match:
+            col_map[req] = match
 
-    df = df.rename(columns={v: k for k, v in col_map.items()})[required]
+    df = df.rename(columns={v: k for k, v in col_map.items()})
+    available = [c for c in required if c in df.columns]
+    df = df[available]
     df = df.dropna(subset=["Username", "Password", "CRN", "PIN"], how="all")
     df["PIN"] = df["PIN"].astype(str).str.strip().str.split(".").str[0]
     df["CRN"] = df["CRN"].astype(str).str.strip().str.split(".").str[0]
     records = df.to_dict(orient="records")
     for r in records:
-        r["label"] = r["Username"]
+        r["label"] = r.get("Name") or r["Username"]
     return records
 
 
@@ -144,7 +151,7 @@ def main():
         try:
             bot.login(user["DP"], user["Username"], user["Password"])
             bot.find_ipo(scrip=IPO_SCRIP)
-            bot.apply_ipo(APPLIED_KITTA, user["CRN"])
+            bot.apply_ipo(str(APPLIED_KITTA), user["CRN"])
             bot.enter_pin(user["PIN"])
             bot.logout()
 
