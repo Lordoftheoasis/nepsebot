@@ -29,14 +29,16 @@ class MeroShare:
         self.wait = WebDriverWait(self.driver, 15)
 
     def login(self, dp_name, username, password):
-        """Log in to MeroShare. Raises clearly if login fails."""
+        """Log in to MeroShare."""
         self.driver.get("https://meroshare.cdsc.com.np/#/login")
-        sleep(2)
+        sleep(1)
 
         self.driver.find_element(By.CLASS_NAME, "select2-selection__placeholder").click()
-        dp_input = self.driver.find_element(By.XPATH, "/html/body/span/span/span[1]/input")
-        dp_input.send_keys(dp_name, Keys.ENTER)
-        sleep(1)
+
+        depository_participant = self.driver.find_element(
+            By.XPATH, "/html/body/span/span/span[1]/input"
+        )
+        depository_participant.send_keys(dp_name, Keys.ENTER)
 
         self.driver.find_element(By.ID, "username").send_keys(username)
         self.driver.find_element(By.ID, "password").send_keys(password, Keys.ENTER)
@@ -54,11 +56,10 @@ class MeroShare:
     def find_ipo(self, scrip: str = None):
         """
         Navigate to ASBA and click the Apply button for the correct IPO.
-        scrip: stock symbol e.g. "NRML". If None, clicks the first IPO.
+        scrip: stock symbol e.g. "KAHL". If None, clicks the first IPO.
         """
+        sleep(1)
         self.driver.get("https://meroshare.cdsc.com.np/#/asba")
-
-        # Wait for apply buttons to render
         self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "btn-issue")))
         sleep(1)
 
@@ -68,8 +69,8 @@ class MeroShare:
             raise Exception("No open IPOs found on the ASBA page.")
 
         if scrip is None:
-            buttons[0].click()
-            sleep(2)
+            # Original behaviour — click first IPO
+            self.driver.find_element(By.CLASS_NAME, "btn-issue").click()
             return
 
         scrip_upper = scrip.strip().upper()
@@ -78,23 +79,20 @@ class MeroShare:
         try:
             page_text = self.driver.find_element(By.TAG_NAME, "body").text
 
-            # If scrip exists anywhere on the page at all
             if f"({scrip_upper})" not in page_text.upper():
                 raise Exception(
                     f"Could not find IPO with scrip '{scrip}'. "
                     f"Found {len(buttons)} IPO(s) but none matched."
                 )
 
-            # Count which button index corresponds to this scrip.
-            # Split by "\nApply" to get chunks — but the sidebar splits off first,
-            # so we only count chunks that look like IPO entries (contain "IPO" or "FPO").
+            # Split by "\nApply" and only count chunks that are actual IPO entries
             chunks = page_text.split("\nApply")
-            ipo_chunk_idx = 0  # which IPO entry (0-based) contains our scrip
             ipo_count = 0
             for chunk in chunks:
                 is_ipo_chunk = any(
                     kw in chunk.upper()
-                    for kw in ["\nIPO\n", "\nFPO\n", "\nRIGHT\n", "\nDEBENTURE\n", "\nMUTUAL\n", "ORDINARY SHARES", "MUTUAL FUND"]
+                    for kw in ["\nIPO\n", "\nFPO\n", "\nRIGHT\n",
+                               "ORDINARY SHARES", "MUTUAL FUND", "DEBENTURE"]
                 )
                 if is_ipo_chunk:
                     if f"({scrip_upper})" in chunk.upper():
@@ -102,28 +100,24 @@ class MeroShare:
                         break
                     ipo_count += 1
 
-            print(f"[find_ipo] Scrip '{scrip_upper}' found at button index: {matched_idx}")
+            print(f"[find_ipo] Scrip '{scrip_upper}' matched at button index: {matched_idx}")
 
         except Exception as e:
             if "Could not find" in str(e):
                 raise
-            print(f"[find_ipo] Page text error: {e}")
+            print(f"[find_ipo] Error: {e}")
 
         if matched_idx is not None and matched_idx < len(buttons):
             buttons[matched_idx].click()
-            sleep(2)
+            sleep(1)
             return
 
-        # Fallback: walk up parent elements
-        for btn in buttons:
-            try:
-                parent = btn.find_element(By.XPATH, "./../..")
-                if f"({scrip_upper})" in parent.text.upper():
-                    btn.click()
-                    sleep(2)
-                    return
-            except Exception:
-                continue
+        # If only 1 button and scrip is confirmed on page — click it
+        if len(buttons) == 1:
+            print(f"[find_ipo] Only 1 button found, clicking it")
+            buttons[0].click()
+            sleep(1)
+            return
 
         raise Exception(
             f"Could not find IPO with scrip '{scrip}'. "
@@ -132,111 +126,95 @@ class MeroShare:
 
     def apply_ipo(self, applied_unit, crn):
         """
-        Fill the application form based on actual UI:
-        1. Wait for form to load
-        2. Select bank (pre-registered bank, pick first option)
-        3. Branch and Account Number auto-fill after bank selection
-        4. Applied Kitta is pre-filled with 10 — only change if different
-        5. Check disclaimer checkbox FIRST
-        6. Enter CRN
-        7. Click Proceed
+        Fill the IPO application form.
+        Follows original source exactly — only the Proceed button
+        selector is updated since the wizard XPath no longer exists.
         """
-        # Wait for bank dropdown to confirm form is loaded
-        self.wait.until(EC.presence_of_element_located((By.ID, "selectBank")))
         sleep(1)
 
-        # Select bank — one ARROW_DOWN from placeholder lands on first registered bank
+        # Select bank — original source uses 2x ARROW_DOWN
         bank = self.driver.find_element(By.ID, "selectBank")
         bank.click()
-        sleep(0.5)
+        bank.send_keys(Keys.ARROW_DOWN)
         bank.send_keys(Keys.ARROW_DOWN)
         bank.send_keys(Keys.ENTER)
-        sleep(1)  # Wait for Branch and Account Number to auto-fill
 
-        # Applied Kitta — always clear and fill from secrets value
-        kitta_field = self.driver.find_element(By.ID, "appliedKitta")
-        kitta_field.click()
-        kitta_field.send_keys(Keys.CONTROL + "a")
-        kitta_field.send_keys(str(applied_unit))
-        sleep(0.5)
+        # Applied Kitta — original source clears then sends
+        applied_kitta = self.driver.find_element(By.ID, "appliedKitta")
+        applied_kitta.clear()
+        applied_kitta.send_keys(applied_unit)
 
-        # Disclaimer checkbox FIRST (before CRN entry)
+        # CRN
+        self.driver.find_element(By.ID, "crnNumber").send_keys(crn)
+
+        # Disclaimer
         self.driver.find_element(By.ID, "disclaimer").click()
-        sleep(0.5)
 
-        # CRN — enter after checkbox
-        crn_field = self.driver.find_element(By.ID, "crnNumber")
-        crn_field.clear()
-        crn_field.send_keys(str(crn))
-        sleep(0.5)
-
-        # Proceed button — find by text, fall back to XPath
-        try:
-            proceed = self.driver.find_element(
-                By.XPATH, "//button[normalize-space(text())='Proceed']"
-            )
-        except Exception:
-            proceed = self.driver.find_element(
-                By.XPATH,
-                '//*[@id="main"]/div/app-edit/div/div/wizard/div/wizard-step[1]/form/div[2]/div/div[4]/div[2]/div/button[1]'
-            )
-        proceed.click()
         sleep(2)
+
+        # Proceed button — wizard XPath removed, try text-based selectors
+        # If none work, log all available buttons for debugging
+        proceed = None
+        for selector in [
+            (By.XPATH, "//button[contains(text(),'Proceed')]"),
+            (By.XPATH, "//button[contains(.,'Proceed')]"),
+            (By.XPATH, '//*[@id="main"]//button[contains(.,"Proceed")]'),
+        ]:
+            try:
+                proceed = self.driver.find_element(*selector)
+                print(f"[apply_ipo] Proceed found via: {selector[1]}")
+                break
+            except Exception:
+                continue
+
+        if proceed is None:
+            all_buttons = self.driver.find_elements(By.TAG_NAME, "button")
+            print(f"[apply_ipo] Buttons on page: {[b.text.strip() for b in all_buttons]}")
+            raise Exception("Could not find Proceed button.")
+
+        proceed.click()
 
     def enter_pin(self, transaction_pin):
         """
-        Enter PIN on the confirmation page.
-
-        From the UI screenshot:
-        - Simple text input (no ID shown, but visible)
-        - Button says "Apply" (not Confirm/Submit)
-        - URL is still #/asba/apply/{id}
+        Enter transaction PIN.
+        Follows original source exactly — only the confirm button
+        selector is updated since the wizard XPath no longer exists.
         """
-        # Wait for PIN input to appear
-        self.wait.until(EC.presence_of_element_located((By.ID, "transactionPIN")))
         sleep(1)
 
         self.driver.find_element(By.ID, "transactionPIN").send_keys(str(transaction_pin))
         sleep(1)
 
-        # Apply button — find by text first, fall back to XPath
-        try:
-            apply_btn = self.driver.find_element(
-                By.XPATH, "//button[normalize-space(text())='Apply']"
-            )
-        except Exception:
-            apply_btn = self.driver.find_element(
-                By.XPATH,
-                '//*[@id="main"]/div/app-issue/div/wizard/div/wizard-step[2]/div[2]/div/form/div[2]/div/div/div/button[1]/span'
-            )
-        apply_btn.click()
-        sleep(3)
+        # Confirm button — original said "button[1]/span" inside wizard
+        # Current UI says "Apply" — try text-based selectors
+        apply_btn = None
+        for selector in [
+            (By.XPATH, "//button[contains(text(),'Apply')]"),
+            (By.XPATH, "//button[contains(.,'Apply')]"),
+            (By.XPATH, '//*[@id="main"]//button[contains(.,"Apply")]'),
+        ]:
+            try:
+                apply_btn = self.driver.find_element(*selector)
+                print(f"[enter_pin] Apply button found via: {selector[1]}")
+                break
+            except Exception:
+                continue
 
-        # Confirm success — look for any success indicator on the page
-        try:
-            page_text = self.driver.find_element(By.TAG_NAME, "body").text
-            if any(word in page_text.lower() for word in ["success", "successful", "applied"]):
-                return  # Application confirmed
-            # If we're still on the PIN page, something went wrong
-            if "transaction pin" in page_text.lower():
-                raise Exception("PIN was rejected or application failed. Check PIN and CRN.")
-        except Exception as e:
-            if "PIN was rejected" in str(e):
-                raise
-            pass  # Page text check failed — proceed anyway
+        if apply_btn is None:
+            all_buttons = self.driver.find_elements(By.TAG_NAME, "button")
+            print(f"[enter_pin] Buttons on page: {[b.text.strip() for b in all_buttons]}")
+            raise Exception("Could not find Apply button on PIN page.")
+
+        apply_btn.click()
+        sleep(2)
 
     def logout(self):
-        """Log out of MeroShare."""
-        sleep(1)
-        try:
-            self.driver.find_element(
-                By.XPATH,
-                "/html/body/app-dashboard/header/div[2]/div/div/div/ul/li[1]/a/i",
-            ).click()
-            sleep(1)
-        except Exception:
-            self.driver.get("https://meroshare.cdsc.com.np/#/login")
+        """Log out — original source."""
+        sleep(2)
+        self.driver.find_element(
+            By.XPATH,
+            "/html/body/app-dashboard/header/div[2]/div/div/div/ul/li[1]/a/i",
+        ).click()
 
     def quit(self):
-        """Close the browser."""
         self.driver.quit()
