@@ -130,6 +130,8 @@ class MeroShare:
         Follows original source exactly — only the Proceed button
         selector is updated since the wizard XPath no longer exists.
         """
+        # Wait for form to load rather than blind sleep
+        self.wait.until(EC.presence_of_element_located((By.ID, "selectBank")))
         sleep(1)
 
         # Select bank — original source uses 2x ARROW_DOWN
@@ -153,7 +155,6 @@ class MeroShare:
         sleep(2)
 
         # Proceed button — wizard XPath removed, try text-based selectors
-        # If none work, log all available buttons for debugging
         proceed = None
         for selector in [
             (By.XPATH, "//button[contains(text(),'Proceed')]"),
@@ -182,11 +183,11 @@ class MeroShare:
         """
         sleep(1)
 
+        self.wait.until(EC.presence_of_element_located((By.ID, "transactionPIN")))
         self.driver.find_element(By.ID, "transactionPIN").send_keys(str(transaction_pin))
         sleep(1)
 
-        # Confirm button — original said "button[1]/span" inside wizard
-        # Current UI says "Apply" — try text-based selectors
+        # Confirm button
         apply_btn = None
         for selector in [
             (By.XPATH, "//button[contains(text(),'Apply')]"),
@@ -209,12 +210,18 @@ class MeroShare:
         sleep(2)
 
     def logout(self):
-        """Log out — original source."""
+        """Log out — original source with try/except so failures don't crash the run."""
         sleep(2)
-        self.driver.find_element(
-            By.XPATH,
-            "/html/body/app-dashboard/header/div[2]/div/div/div/ul/li[1]/a/i",
-        ).click()
+        try:
+            self.driver.find_element(
+                By.XPATH,
+                "/html/body/app-dashboard/header/div[2]/div/div/div/ul/li[1]/a/i",
+            ).click()
+            sleep(1)
+        except Exception:
+            # Navigate to login page so next account's login works cleanly
+            self.driver.get("https://meroshare.cdsc.com.np/#/login")
+            sleep(1)
 
     def quit(self):
         self.driver.quit()
