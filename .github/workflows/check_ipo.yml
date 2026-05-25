@@ -1,16 +1,14 @@
 name: Check for Open IPOs
 
 on:
-  # Runs every Monday and Thursday at 8:45 AM Nepal time (3:00 AM UTC)
   schedule:
     - cron: "0 3 * * 1,4"
-
-  # Also allows manual trigger from GitHub Actions tab
   workflow_dispatch:
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -28,9 +26,6 @@ jobs:
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
-
-      - name: Check Chrome version
-        run: google-chrome --version && chromedriver --version
 
       - name: Check for open IPOs
         env:
