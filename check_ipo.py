@@ -61,12 +61,11 @@ def get_first_account() -> dict:
     for row in rows:
         normalized = {k.strip().lower(): str(v).strip() for k, v in row.items()}
         if normalized.get("username") and normalized.get("password"):
-            # Clean float-style numbers
             for field in ["crn", "pin"]:
                 if normalized.get(field, "").endswith(".0"):
                     normalized[field] = normalized[field][:-2]
             return {
-                "Name":     normalized.get("name", "Account 1"),
+                "label":    normalized.get("username", "Account 1"),
                 "DP":       normalized.get("dp", ""),
                 "Username": normalized.get("username", ""),
                 "Password": normalized.get("password", ""),
@@ -77,35 +76,38 @@ def get_first_account() -> dict:
 
 
 def make_driver() -> webdriver.Chrome:
-    """Create a headless Chrome driver for GitHub Actions environment."""
-    import subprocess
-    # Print Chrome and ChromeDriver versions for debugging
-    try:
-        chrome_ver = subprocess.check_output(["google-chrome", "--version"]).decode().strip()
-        driver_ver = subprocess.check_output(["chromedriver", "--version"]).decode().strip()
-        print(f"[check_ipo] {chrome_ver}")
-        print(f"[check_ipo] {driver_ver}")
-    except Exception as e:
-        print(f"[check_ipo] Could not get versions: {e}")
+    """Create a headless Chrome driver using webdriver-manager for matching ChromeDriver."""
+    import os
+    from webdriver_manager.chrome import ChromeDriverManager
+    from pathlib import Path
+    from selenium.webdriver.chrome.service import Service as ChromeService
+
+    os.environ["WDM_LOG"] = "0"
 
     opts = Options()
     opts.add_argument("--headless=new")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
-    opts.add_argument("--disable-extensions")
     opts.add_argument("--disable-setuid-sandbox")
-    opts.add_argument("--remote-debugging-port=9222")
     opts.add_argument("--window-size=1920,1080")
-    opts.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    opts.add_argument(
+        "--user-agent=Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    )
 
-    try:
-        driver = webdriver.Chrome(options=opts)
-        print("[check_ipo] Chrome launched successfully")
-        return driver
-    except Exception as e:
-        print(f"[check_ipo] Chrome failed to launch: {type(e).__name__}: {e}")
-        raise
+    raw_path    = ChromeDriverManager().install()
+    driver_path = raw_path
+    if not os.access(raw_path, os.X_OK):
+        for f in Path(raw_path).parent.iterdir():
+            if f.name.startswith("chromedriver") and os.access(f, os.X_OK):
+                driver_path = str(f)
+                break
+
+    print(f"[check_ipo] chromedriver: {driver_path}")
+    driver = webdriver.Chrome(service=ChromeService(driver_path), options=opts)
+    print("[check_ipo] Chrome launched successfully")
+    return driver
 
 
 def login(driver, dp_name: str, username: str, password: str):
@@ -335,6 +337,10 @@ def send_ipo_message(ipo: dict, index: int, total: int):
     max_unit    = ipo.get("max_unit",    "—")
     share_value = ipo.get("share_value", "—")
 
+    # Discord button labels max 80 chars — truncate company name if needed
+    short_name  = name if len(name) <= 50 else name[:47] + "..."
+    apply_label = f"✅ Apply — {short_name}"
+
     apply_id = f"apply_ipo:{scrip}"
     skip_id  = f"skip_ipo:{scrip}"
 
@@ -349,15 +355,15 @@ def send_ipo_message(ipo: dict, index: int, total: int):
                 ),
                 "color": 0x3498DB,
                 "fields": [
-                    {"name": "📂 Issue Type",      "value": issue_type,  "inline": True},
-                    {"name": "📋 Share Type",       "value": share_type,  "inline": True},
-                    {"name": "📝 For",              "value": issue_desc,  "inline": True},
-                    {"name": "📅 Opens",            "value": open_date,   "inline": True},
-                    {"name": "📅 Closes",           "value": close_date,  "inline": True},
-                    {"name": "💰 Price Per Unit",   "value": f"Rs. {share_value}", "inline": True},
-                    {"name": "📦 Min Kitta",        "value": min_unit,    "inline": True},
-                    {"name": "📦 Max Kitta",        "value": max_unit,    "inline": True},
-                    {"name": "🔖 Scrip",            "value": scrip,       "inline": True},
+                    {"name": "📂 Issue Type",    "value": issue_type,          "inline": True},
+                    {"name": "📋 Share Type",     "value": share_type,          "inline": True},
+                    {"name": "📝 For",            "value": issue_desc,          "inline": True},
+                    {"name": "📅 Opens",          "value": open_date,           "inline": True},
+                    {"name": "📅 Closes",         "value": close_date,          "inline": True},
+                    {"name": "💰 Price Per Unit", "value": f"Rs. {share_value}","inline": True},
+                    {"name": "📦 Min Kitta",      "value": min_unit,            "inline": True},
+                    {"name": "📦 Max Kitta",      "value": max_unit,            "inline": True},
+                    {"name": "🔖 Scrip",          "value": scrip,               "inline": True},
                 ],
                 "footer": {"text": "MeroShare IPO Bot"},
                 "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -370,7 +376,7 @@ def send_ipo_message(ipo: dict, index: int, total: int):
                     {
                         "type": 2,
                         "style": 3,
-                        "label": f"✅ Apply — {name}",
+                        "label": apply_label,
                         "custom_id": apply_id,
                     },
                     {
@@ -406,7 +412,7 @@ def main():
 
     # Get first account to use for login
     account = get_first_account()
-    print(f"[check_ipo] Using account: {account['Name']} to check for open IPOs")
+    print(f"[check_ipo] Using account: {account['label']} to check for open IPOs")
 
     driver = make_driver()
 
@@ -421,7 +427,6 @@ def main():
         import traceback
         print(f"[check_ipo] Error during scrape: {type(e).__name__}: {e}")
         print(traceback.format_exc())
-        driver.quit()
         sys.exit(1)
     finally:
         driver.quit()
