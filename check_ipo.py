@@ -77,10 +77,8 @@ def get_first_account() -> dict:
 
 def make_driver() -> webdriver.Chrome:
     """Create a headless Chrome driver using webdriver-manager for matching ChromeDriver."""
-    import os
     from webdriver_manager.chrome import ChromeDriverManager
     from pathlib import Path
-    from selenium.webdriver.chrome.service import Service as ChromeService
 
     os.environ["WDM_LOG"] = "0"
 
@@ -105,7 +103,7 @@ def make_driver() -> webdriver.Chrome:
                 break
 
     print(f"[check_ipo] chromedriver: {driver_path}")
-    driver = webdriver.Chrome(service=ChromeService(driver_path), options=opts)
+    driver = webdriver.Chrome(service=Service(driver_path), options=opts)
     print("[check_ipo] Chrome launched successfully")
     return driver
 
@@ -116,7 +114,6 @@ def login(driver, dp_name: str, username: str, password: str):
     driver.get("https://meroshare.cdsc.com.np/#/login")
     sleep(3)
 
-    # Click DP dropdown
     driver.find_element(By.CLASS_NAME, "select2-selection__placeholder").click()
     dp_input = driver.find_element(By.XPATH, "/html/body/span/span/span[1]/input")
     dp_input.send_keys(dp_name, Keys.ENTER)
@@ -126,8 +123,14 @@ def login(driver, dp_name: str, username: str, password: str):
     driver.find_element(By.ID, "password").send_keys(password, Keys.ENTER)
     sleep(3)
 
-    # Confirm we reached the dashboard
-    wait.until(EC.url_contains("dashboard"))
+    try:
+        wait.until(EC.url_contains("dashboard"))
+        print(f"[check_ipo] Logged in successfully as {username}")
+    except Exception:
+        raise Exception(
+            f"Login failed for '{username}'. "
+            "Check DP name, username, password, or if MeroShare is down."
+        )
 
 
 def scrape_open_ipos(driver) -> list[dict]:
