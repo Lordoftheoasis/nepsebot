@@ -14,7 +14,7 @@ on:
 jobs:
   apply:
     runs-on: ubuntu-latest
-    timeout-minutes: 30    # Prevent hanging forever if Chrome stalls
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -26,18 +26,13 @@ jobs:
           python-version: "3.11"
 
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt webdriver-manager gspread google-auth
 
-      - name: Install Google auth dependencies
-        run: pip install gspread google-auth
-
-      - name: Install Chrome and ChromeDriver
-        uses: browser-actions/setup-chrome@v1
-        with:
-          chrome-version: stable
-
-      - name: Check Chrome version
-        run: google-chrome --version && chromedriver --version
+      - name: Install Google Chrome
+        run: |
+          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
+          google-chrome --version
 
       - name: Apply IPO for all accounts
         env:
