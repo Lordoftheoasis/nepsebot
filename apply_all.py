@@ -62,7 +62,10 @@ def load_accounts_from_sheets() -> list[dict]:
     creds  = Credentials.from_service_account_info(sa_info, scopes=SCOPES)
     client = gspread.authorize(creds)
     sheet  = client.open_by_key(GOOGLE_SHEET_ID).sheet1
-    rows   = sheet.get_all_records()
+
+    # Use FORMATTED_VALUE so numbers with leading zeros (CRN, PIN) are
+    # returned as the formatted string Google Sheets displays, not as integers
+    rows = sheet.get_all_records(value_render_option="FORMATTED_VALUE")
 
     required = ["Name", "DP", "Username", "Password", "CRN", "PIN"]
     accounts = []
@@ -82,9 +85,10 @@ def load_accounts_from_sheets() -> list[dict]:
         if not account["Username"] or not account["Password"]:
             continue
 
-        # Strip float-style formatting from PIN and CRN just in case
-        account["PIN"] = account["PIN"].split(".")[0]
-        account["CRN"] = account["CRN"].split(".")[0]
+        # Strip float formatting but preserve leading zeros
+        # Use split(".")[0] not lstrip("0") — we want "005006148" not "5006148"
+        account["PIN"] = account["PIN"].split(".")[0].strip()
+        account["CRN"] = account["CRN"].split(".")[0].strip()
 
         # Use Name for display if available, fall back to Username
         account["label"] = account.get("Name") or account["Username"]
