@@ -63,9 +63,12 @@ def load_accounts_from_sheets() -> list[dict]:
     client = gspread.authorize(creds)
     sheet  = client.open_by_key(GOOGLE_SHEET_ID).sheet1
 
-    # Use FORMATTED_VALUE so numbers with leading zeros (CRN, PIN) are
-    # returned as the formatted string Google Sheets displays, not as integers
-    rows = sheet.get_all_records(value_render_option="FORMATTED_VALUE")
+    # numericise_ignore=['all'] tells gspread to return ALL values as strings
+    # without converting numbers — this preserves leading zeros in CRN/PIN
+    rows = sheet.get_all_records(
+        value_render_option="FORMATTED_VALUE",
+        numericise_ignore=["all"],
+    )
 
     required = ["Name", "DP", "Username", "Password", "CRN", "PIN"]
     accounts = []
