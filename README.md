@@ -16,9 +16,9 @@ check_ipo.py — logs into MeroShare, scrapes ASBA page
         │
         ├── No IPO open → silent, does nothing
         │
-        └── IPO found → Discord message with [✅ Apply] [❌ Skip] buttons
+        └── IPO found → Discord message with [ Apply] [ Skip] buttons
                               │
-                        You click ✅ Apply
+                        You click  Apply
                               │
                               ▼
                    Cloudflare Worker (worker.js)
@@ -35,7 +35,7 @@ check_ipo.py — logs into MeroShare, scrapes ASBA page
                               │
                               ▼
                    Discord webhook notifications
-                   (✅/❌ per account + final summary)
+                   (done/failed per account + final summary)
 ```
 
 ---
@@ -155,7 +155,7 @@ The Cloudflare Worker needs this to trigger GitHub Actions when you click Apply.
 
 1. Go to **https://github.com/settings/tokens** → **Generate new token (classic)**
 2. Name: `meroshare-bot`
-3. Scopes: ✅ `repo` ✅ `workflow`
+3. Scopes: tick `repo` tick `workflow`
 4. Click **Generate token** → copy immediately (shown once only) → save as `GITHUB_TOKEN`
 
 ---
@@ -205,7 +205,7 @@ Open your Worker URL in a browser. You should see `Method Not Allowed`. This con
 **Test 2 — Full flow:**
 1. GitHub → Actions → **Check for Open IPOs** → **Run workflow**
 2. Wait for it to complete — you should get a Discord message with Apply/Skip buttons
-3. Click **✅ Apply**
+3. Click ** Apply**
 4. Watch Cloudflare logs (Worker → Logs → Begin log stream) for the request
 5. GitHub → Actions should show a new **Apply IPO** run starting
 6. Discord webhook should post per-account results and a final summary
@@ -221,8 +221,8 @@ Every **Monday and Thursday at 8:45 AM Nepal time**, `check_ipo.py` runs automat
 
 - **No IPO open** → silent, nothing happens, no notifications
 - **IPO found** → Discord alert with company name, type, dates, price, min/max kitta + Apply and Skip buttons
-- **Click ✅ Apply** → Cloudflare triggers GitHub Actions → applies for all accounts → Discord notifications per account + summary
-- **Click ❌ Skip** → buttons removed, no application made
+- **Click  Apply** → Cloudflare triggers GitHub Actions → applies for all accounts → Discord notifications per account + summary
+- **Click  Skip** → buttons removed, no application made
 
 **Manual triggers** (GitHub → Actions):
 - **Check for Open IPOs** → run the IPO check right now
