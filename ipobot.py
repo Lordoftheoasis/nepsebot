@@ -73,7 +73,17 @@ class MeroShare:
     def login(self, dp_name, user_name, password):
         """Log into MeroShare."""
         self.driver.get("https://meroshare.cdsc.com.np/#/login")
-        sleep(3)
+
+        # Wait for Select2 DP dropdown to render — don't rely on sleep
+        try:
+            self.wait.until(EC.presence_of_element_located(
+                (By.CLASS_NAME, "select2-selection__placeholder")
+            ))
+        except Exception:
+            self.wait.until(EC.presence_of_element_located(
+                (By.CLASS_NAME, "select2-selection")
+            ))
+        sleep(1)
 
         self.driver.find_element(By.CLASS_NAME, "select2-selection__placeholder").click()
         dp_input = self.driver.find_element(By.XPATH, "/html/body/span/span/span[1]/input")
