@@ -56,7 +56,10 @@ def get_first_account() -> dict:
     creds   = Credentials.from_service_account_info(sa_info, scopes=SCOPES)
     client  = gspread.authorize(creds)
     sheet   = client.open_by_key(GOOGLE_SHEET_ID).sheet1
-    rows    = sheet.get_all_records()
+    rows    = sheet.get_all_records(
+        value_render_option="FORMATTED_VALUE",
+        numericise_ignore=["all"],
+    )
 
     for row in rows:
         normalized = {k.strip().lower(): str(v).strip() for k, v in row.items()}
@@ -112,7 +115,18 @@ def login(driver, dp_name: str, username: str, password: str):
     """Log into MeroShare."""
     wait = WebDriverWait(driver, 15)
     driver.get("https://meroshare.cdsc.com.np/#/login")
-    sleep(3)
+
+    # Wait for the Select2 DP dropdown to render — don't rely on sleep
+    try:
+        wait.until(EC.presence_of_element_located(
+            (By.CLASS_NAME, "select2-selection__placeholder")
+        ))
+    except Exception:
+        # Fallback — try the rendered select2 container instead
+        wait.until(EC.presence_of_element_located(
+            (By.CLASS_NAME, "select2-selection")
+        ))
+    sleep(1)
 
     driver.find_element(By.CLASS_NAME, "select2-selection__placeholder").click()
     dp_input = driver.find_element(By.XPATH, "/html/body/span/span/span[1]/input")
