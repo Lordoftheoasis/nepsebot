@@ -1,6 +1,6 @@
 """
 check_ipo.py
-------------
+----------
 Runs on GitHub Actions cron (Mon & Thu)
 Logs into MeroShare using the FIRST account from Google Sheets,
 scrapes the ASBA page for open IPOs, then sends one Discord message
